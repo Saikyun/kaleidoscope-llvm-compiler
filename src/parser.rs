@@ -17,148 +17,178 @@ pub enum Ast {
     Function(Prototype, Expr),
 }
 
-fn parse_expr(tokens: &[Token], ast: &mut Vec<Ast>) -> (usize, Option<Expr>) {
-    match &tokens[0] {
-        Token::Kwd(c) => parse_kwd(&tokens, ast),
-        Token::Number(f) => (1, Some(Expr::Number(*f))),
-        Token::Ident(ref s) => parse_ident(&tokens, ast),
-        _ => (1, None),
-    }
-}
+use std::borrow::BorrowMut;
 
-fn parse_binop(op: &Token, left_side: Expr, tokens: &[Token], ast: &mut Vec<Ast>) -> (usize, Option<Expr>) {
-    let (jmp, right_side) = parse_primary_expr(&tokens, ast);
+fn parse_kwd<'a>(
+    kwd: char,
+    tokens: &[Token],
+    stack: &mut Vec<Expr>,
+) -> (usize, Result<Expr, String>) {
+    let BINARY_OPERATORS = ['+', '-', '/', '*', '<', '>'];
 
-    let right_side = match right_side {
-        Some(e) => e,
-        _ => panic!(format!("{:?} is not an Expr", right_side)),
-    };
+    use self::Token::*;
 
-    match op {
-        Token::Kwd(c) => (
-            1 + jmp,
-            Some(Expr::Binary(*c, box left_side, box right_side)),
-        ),
-        _ => panic!(format!("{:?} is not Kwd operator", op)),
-    }
-}
+    println!(">> it gun be guud parse {:?} {:?}", kwd, tokens.get(0));
 
-fn parse_prototype(tokens: &[Token]) -> (usize, Option<Prototype>) {
-    let name = &tokens[0];
+    let lule = match kwd {
+        '(' => match stack.pop() {
+            Some(Expr::Variable(ref s)) => {
+                let mut jmp = 0;
+                let mut args = Vec::<Expr>::new();
 
-    let name = match name {
-        Token::Ident(s) => s,
-        _ => panic!(format!("{:?} is not an ident", name)),
-    };
-
-    let args = tokens[2..]
-        .iter()
-        .take_while(|v| match v {
-            Token::Kwd(')') => false,
-            _ => true,
-        })
-        .filter_map(|v| match v {
-            Token::Kwd(',') => None,
-            Token::Ident(s) => Some(s.clone()),
-            _ => panic!(format!("{:?} is not , or Ident", v)),
-        })
-        .collect::<Vec<String>>();
-
-    (1 + 2 + (args.len() * 2 - 1), Some((name.clone(), args)))
-}
-
-fn parse_ast(tokens: &[Token], ast: &mut Vec<Ast>) -> usize {
-    match tokens[0] {
-        Token::Def => {
-            let (jmp, proto) = parse_prototype(&tokens[1..]);
-            proto.map(|v| ast.push(Ast::Prototype(v)));
-            jmp + 1
-        }
-        ref a => {
-            let (jmp, expr) = parse_primary_expr(&tokens, ast);
-            expr.map(|v| ast.push(Ast::Expr(v)));
-            jmp
-        }
-    }
-}
-
-fn parse_primary_expr(tokens: &[Token], ast: &mut Vec<Ast>) -> (usize, Option<Expr>) {
-    let operators = ['+', '-', '<'];
-
-    println!("{:?}", tokens);
-    let (jmp, expr) = match tokens[0] {
-        ref e => parse_expr(&tokens, ast),
-    };
-
-    if expr.is_none() { return (jmp, None); }
-
-    let expr = expr.unwrap();
-
-    match &tokens.get(jmp) {
-        Some(Token::Kwd(c)) if operators.contains(c) => {
-            /*let last_expr = match ast.pop() {
-            Some(Ast::Expr(e)) => e,
-            a => panic!(format!("{:?} is not Expr", a)),
-        };*/
-
-            println!("consumed {:?}", expr);
-            let (jmp2, expr2) = parse_binop(&tokens[jmp], expr, &tokens[jmp + 1..], ast);
-
-                        println!("{:?}", expr2);
-            println!("jump {:?}", jmp + jmp2);
-
-            (jmp + jmp2, expr2)
-        }
-        _ => (jmp, Some(expr)),
-    }
-}
-
-fn parse_args(tokens: &[Token], ast: &mut Vec<Ast>) -> (usize, Vec<Expr>) {
-    match tokens[0] {
-        Token::Kwd(')') => (0, vec![]),
-        _ => {
-            let (jmp1, first) = parse_primary_expr(&tokens[0..], ast);
-
-            let (jmp2, mut more) = match tokens[jmp1] {
-                Token::Kwd(',') => parse_args(&tokens[jmp1 + 1..], ast),
-                Token::Kwd(')') => (0, vec![]),
-                _ => (1, vec![]),
-            ref t => panic!(format!("{:?} is not , or )", t)),
-    };
-
-    first.map(|v| more.push(v));
-    (jmp1 + jmp2, more)
-}
-    }
-}
-
-fn parse_ident(tokens: &[Token], ast: &mut Vec<Ast>) -> (usize, Option<Expr>) {
-    match tokens[0] {
-        Token::Ident(ref s) => {
-            let next = tokens.get(1);
-            match next {
-                Some(Token::Kwd('(')) => {
-                    let (jmp, args) = parse_args(&tokens[2..], ast);
-                    let closing = &tokens[jmp + 1];
-                    (jmp + 3, Some(Expr::Call(s.clone(), args)))
+                while tokens[jmp..].len() > 0 {
+                    let t = &tokens[jmp];
+                    println!("now da args is {:?}", args);
+                    match t {
+                        Def | Extern => panic!("wtf no def or extern in args"),
+                        Kwd(',') => jmp += 1,
+                        Kwd(')') => {
+                            jmp += 1;
+                            println!("yee boi");
+                            break;
+                        }
+                        _ => match parse_expr(&tokens[jmp..], &mut args) {
+                            (jmp2, Ok(e)) => {
+                                args.push(e);
+                                println!("after da args are {:?}", args);
+                                jmp += jmp2;
+                            }
+                            (jmp2, Err(e)) => {
+                                jmp += jmp2;
+                                panic!(e);
+                            }
+                        },
+                    }
                 }
-                _ => (1, Some(Expr::Variable(s.clone()))),
+
+                (jmp, Ok(Expr::Call(s.clone(), args)))
             }
-        }
-        _ => (1, None),
-        ref t => panic!(format!("{:?} is not Ident", t)),
-    }
+
+            _ => (1, Err("Nothing on the stack.".to_owned())),
+        },
+        ref c if BINARY_OPERATORS.contains(c) => match stack.pop() {
+            Some(v) => {
+                //let mut stack = Vec::<Expr>::new();
+
+                let (jmp, expr) = parse_expr(&tokens[0..], stack);
+                match expr {
+                    Ok(e) => (jmp, Ok(Expr::Binary(*c, box v, box e))),
+                    Err(e) => (jmp, Err(e)),
+                }
+            }
+
+            _ => (1, Err("Nothing on the stack for binary.".to_owned())),
+        },
+        _ => (1, Ok(Expr::Number(1.0))),
+    };
+
+    println!("<< omfg {:?}", lule);
+
+    lule
 }
 
-fn parse_kwd(tokens: &[Token], ast: &mut Vec<Ast>) -> (usize, Option<Expr>) {
-    match tokens[0] {
-        Token::Kwd('(') => {
-            let (jmp, expr) = parse_expr(&tokens[1..], ast);
-            let closing = &tokens[jmp + 1];
-            (jmp + 3, expr)
-        }
-        _ => (1, None),
-        ref t => panic!(format!("{:?} is not Kwd", t)),
+fn parse_expr<'a>(tokens: &[Token], stack: &'a mut Vec<Expr>) -> (usize, Result<Expr, String>) {
+    use self::Expr::*;
+
+    println!("gun parse {:?}", tokens.get(0));
+
+    tokens
+        .get(0)
+        .map(|t| match t {
+            Token::Number(n) => (1, Ok(Number(*n))),
+            Token::Ident(ref s) => {
+                let var = Variable(s.clone());
+
+                match tokens.get(1) {
+                    Some(Token::Kwd('(')) => {
+                        stack.push(var);
+                        let (jmp, res) = parse_expr(&tokens[1..], stack);
+                        (jmp + 1, res)
+                    }
+                    _ => (1, Ok(var)),
+                }
+            }
+
+            Token::Kwd(c) => {
+                let (jmp, res) = parse_kwd(*c, &tokens[1..], stack);
+                (jmp + 1, res)
+            }
+            _ => (1, Ok(Number(1.0))),
+        })
+        .unwrap_or((0, Err("Token-list is empty.".to_owned())))
+}
+
+enum OneOrMany<T> {
+    One(T),
+    Many(Vec<T>),
+}
+
+use self::OneOrMany::*;
+
+fn parse_ast(tokens: &[Token]) -> (usize, Result<OneOrMany<Ast>, String>) {
+    use self::Token::*;
+
+    match tokens.get(0).ok_or("Token-list is empty.".to_owned()) {
+        Err(e) => (0, Err(e)),
+        Ok(t) => match t {
+            Token::Def => match (tokens.get(1), tokens.get(2)) {
+                (Some(Ident(ref name)), Some(Kwd('('))) => {
+                    let mut args = vec![];
+                    let mut jmp = 3;
+
+                    while tokens[jmp..].len() > 0 {
+                        let t = &tokens[jmp];
+                        println!("now da args is {:?}", args);
+                        match t {
+                            Def | Extern => panic!("wtf no def or extern in args"),
+                            Kwd(',') => jmp += 1,
+                            Kwd(')') => {
+                                jmp += 1;
+                                println!("yee boi");
+                                break;
+                            }
+                            Ident(ref arg) => {
+                                jmp += 1;
+                                args.push(arg.clone())
+                            }
+
+                            hm => return (2, Err(format!("{:?} is not , ) or Ident", hm))),
+                        }
+                    }
+
+                    (jmp, Ok(One(Ast::Prototype((name.clone(), args)))))
+                }
+                _ => (
+                    1,
+                    Err("Def must be followed by Ident and Kwd('(')".to_owned()),
+                ),
+            },
+            Token::Extern => (1, Err("Extern not implemented.".to_owned())),
+            a => {
+                let mut vec = vec![];
+                let mut jmp = 0;
+
+                while (jmp < tokens.len()) {
+                    match parse_expr(&tokens[jmp..], &mut vec) {
+                        (j, Err(e)) => {
+                            jmp += j;
+                            return (jmp, Err(e));
+                        }
+                        (j, Ok(e)) => {
+                            jmp += j;
+                            vec.push(e);
+                        }
+                    }
+                }
+
+                (
+                    jmp,
+                    Ok(Many(
+                        vec.into_iter().map(|e| Ast::Expr(e)).collect::<Vec<_>>(),
+                    )),
+                )
+            }
+        },
     }
 }
 
@@ -168,8 +198,14 @@ pub fn parse(tokens: &[Token]) -> Vec<Ast> {
     let mut i = 0;
 
     while i < tokens.len() {
-        let jmp = parse_ast(&tokens[i..], &mut ast);
+        let (jmp, node) = parse_ast(&tokens[i..]);
+        match node {
+            Ok(Many(mut a)) => ast.append(&mut a),
+            Ok(One(a)) => ast.push(a),
+            Err(e) => panic!(e),
+        }
         i += jmp;
+        println!("{:?}", i);
     }
 
     ast

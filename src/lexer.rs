@@ -22,6 +22,7 @@ fn match_number(str: &[u8]) -> (usize, Option<Token>) {
 
 fn match_number_or_kwd(str: &[u8]) -> (usize, Option<Token>) {
     match str[0] as char {
+        '\0' => (1, None),
         '#' => (str.iter().position(|v| *v == b'\n').unwrap_or(str.len()), None),
         c if c.is_digit(10) => match_number(&str),
         c => (1, Some(Token::Kwd(c))),

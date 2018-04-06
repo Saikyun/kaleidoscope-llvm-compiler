@@ -9,8 +9,8 @@ fn main() {
 if x < 3 then
 1
 else
-fib(x-1+3)+fib(x-2)+fib(x-3)";
-    let str = b"fib(x-1+3)+1";
+fib(x-1+3)+fib(x-2)+fib(x-3)\0";
+    //let str = b"fib(x-99+3)+23+2+fib(x-4)\0";
 
     let res = lexer::lex(str);
     println!("{:?}", res);
