@@ -1,4 +1,5 @@
 use lexer::Token;
+use std::collections::HashMap;
 
 #[derive(Debug)]
 pub enum Expr {
@@ -17,18 +18,19 @@ pub enum Ast {
     Function(Prototype, Expr),
 }
 
-use std::borrow::BorrowMut;
-
 fn parse_kwd<'a>(
     kwd: char,
     tokens: &[Token],
     stack: &mut Vec<Expr>,
 ) -> (usize, Result<Expr, String>) {
-    let BINARY_OPERATORS = ['+', '-', '/', '*', '<', '>'];
+    let binary_operators = ['+', '-', '/', '*', '<', '>'];
+    let mut precedence = HashMap::new();
+    precedence.insert('/', 10);
+    precedence.insert('+', 20);
+    precedence.insert('-', 20);
+    precedence.insert('*', 40);
 
     use self::Token::*;
-
-    println!(">> it gun be guud parse {:?} {:?}", kwd, tokens.get(0));
 
     let lule = match kwd {
         '(' => match stack.pop() {
@@ -38,19 +40,16 @@ fn parse_kwd<'a>(
 
                 while tokens[jmp..].len() > 0 {
                     let t = &tokens[jmp];
-                    println!("now da args is {:?}", args);
                     match t {
                         Def | Extern => panic!("wtf no def or extern in args"),
                         Kwd(',') => jmp += 1,
                         Kwd(')') => {
                             jmp += 1;
-                            println!("yee boi");
                             break;
                         }
                         _ => match parse_expr(&tokens[jmp..], &mut args) {
                             (jmp2, Ok(e)) => {
                                 args.push(e);
-                                println!("after da args are {:?}", args);
                                 jmp += jmp2;
                             }
                             (jmp2, Err(e)) => {
@@ -64,9 +63,60 @@ fn parse_kwd<'a>(
                 (jmp, Ok(Expr::Call(s.clone(), args)))
             }
 
-            _ => (1, Err("Nothing on the stack.".to_owned())),
+            _ => {
+                let mut jmp = 0;
+                let mut stack = Vec::<Expr>::new();
+
+                while tokens[jmp..].len() > 0 {
+                    let t = &tokens[jmp];
+                    match t {
+                        Def | Extern => panic!("wtf no def or extern in args"),
+                        Kwd(',') => jmp += 1,
+                        Kwd(')') => {
+                            jmp += 1;
+                            break;
+                        }
+                        _ => match parse_expr(&tokens[jmp..], &mut stack) {
+                            (jmp2, Ok(e)) => {
+                                stack.push(e);
+                                jmp += jmp2;
+                            }
+                            (jmp2, Err(e)) => {
+                                jmp += jmp2;
+                                panic!(e);
+                            }
+                        },
+                    }
+                }
+
+                (jmp, Ok(stack.remove(0)))
+            }
         },
-        ref c if BINARY_OPERATORS.contains(c) => match stack.pop() {
+        ref c if binary_operators.contains(c) => match stack.pop() {
+            Some(Expr::Binary(c2, e1, e2)) => {
+                let (jmp, rhs) = parse_expr(&tokens[0..], stack);
+
+                let rhs = match rhs {
+                    Ok(expr) => expr,
+                    Err(e) => return (jmp, Err(e)),
+                };
+
+                let bin = match (precedence.get(&c), precedence.get(&c2)) {
+                    (Some(i1), Some(i2)) => {
+                        if i2 >= i1 {
+                            let lhs = Expr::Binary(c2, e1, e2);
+                            Ok(Expr::Binary(*c, box lhs, box rhs))
+                        } else {
+                            let lhs = e1;
+                            let rhs = Expr::Binary(*c, e2, box rhs);
+                            Ok(Expr::Binary(c2, lhs, box rhs))
+                        }
+                    }
+                    _ => Err(format!("No precedence for {:?} or {:?}", c, c2)),
+                };
+
+                (jmp, bin)
+            }
             Some(v) => {
                 //let mut stack = Vec::<Expr>::new();
 
@@ -82,15 +132,11 @@ fn parse_kwd<'a>(
         _ => (1, Ok(Expr::Number(1.0))),
     };
 
-    println!("<< omfg {:?}", lule);
-
     lule
 }
 
 fn parse_expr<'a>(tokens: &[Token], stack: &'a mut Vec<Expr>) -> (usize, Result<Expr, String>) {
     use self::Expr::*;
-
-    println!("gun parse {:?}", tokens.get(0));
 
     tokens
         .get(0)
@@ -138,13 +184,11 @@ fn parse_ast(tokens: &[Token]) -> (usize, Result<OneOrMany<Ast>, String>) {
 
                     while tokens[jmp..].len() > 0 {
                         let t = &tokens[jmp];
-                        println!("now da args is {:?}", args);
                         match t {
                             Def | Extern => panic!("wtf no def or extern in args"),
                             Kwd(',') => jmp += 1,
                             Kwd(')') => {
                                 jmp += 1;
-                                println!("yee boi");
                                 break;
                             }
                             Ident(ref arg) => {
@@ -159,14 +203,12 @@ fn parse_ast(tokens: &[Token]) -> (usize, Result<OneOrMany<Ast>, String>) {
                     let proto = (name.clone(), args);
 
                     let (jmp2, body) = parse_expr_list(&tokens[jmp..]);
-                    let mut body =
-                        match body {
-                            Ok(body) => body,
-                            Err(e) => return (jmp + jmp2, Err(e)),
-                        };
+                    let mut body = match body {
+                        Ok(body) => body,
+                        Err(e) => return (jmp + jmp2, Err(e)),
+                    };
 
                     (jmp + jmp2, Ok(One(Ast::Function(proto, body.remove(0)))))
-
                 }
                 _ => (
                     1,
@@ -178,9 +220,7 @@ fn parse_ast(tokens: &[Token]) -> (usize, Result<OneOrMany<Ast>, String>) {
                 let (jmp, body) = parse_expr_list(&tokens[0..]);
                 (
                     jmp,
-                    body.map(|vec| Many(
-                        vec.into_iter().map(|e| Ast::Expr(e)).collect::<Vec<_>>()
-                    ))
+                    body.map(|vec| Many(vec.into_iter().map(|e| Ast::Expr(e)).collect::<Vec<_>>())),
                 )
             }
         },
@@ -191,7 +231,7 @@ pub fn parse_expr_list(tokens: &[Token]) -> (usize, Result<Vec<Expr>, String>) {
     let mut vec = vec![];
     let mut jmp = 0;
 
-    while (jmp < tokens.len()) {
+    while jmp < tokens.len() {
         match tokens[jmp] {
             Token::Kwd(';') => {
                 jmp += 1;
@@ -228,7 +268,7 @@ pub fn parse(tokens: &[Token]) -> Vec<Ast> {
             Err(e) => panic!(e),
         }
         i += jmp;
-        println!("{:?}", i);
+        //println!("{:?}", i);
     }
 
     ast
