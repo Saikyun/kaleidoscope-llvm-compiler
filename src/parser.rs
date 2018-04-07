@@ -156,7 +156,17 @@ fn parse_ast(tokens: &[Token]) -> (usize, Result<OneOrMany<Ast>, String>) {
                         }
                     }
 
-                    (jmp, Ok(One(Ast::Prototype((name.clone(), args)))))
+                    let proto = (name.clone(), args);
+
+                    let (jmp2, body) = parse_expr_list(&tokens[jmp..]);
+                    let mut body =
+                        match body {
+                            Ok(body) => body,
+                            Err(e) => return (jmp + jmp2, Err(e)),
+                        };
+
+                    (jmp + jmp2, Ok(One(Ast::Function(proto, body.remove(0)))))
+
                 }
                 _ => (
                     1,
@@ -165,31 +175,44 @@ fn parse_ast(tokens: &[Token]) -> (usize, Result<OneOrMany<Ast>, String>) {
             },
             Token::Extern => (1, Err("Extern not implemented.".to_owned())),
             a => {
-                let mut vec = vec![];
-                let mut jmp = 0;
-
-                while (jmp < tokens.len()) {
-                    match parse_expr(&tokens[jmp..], &mut vec) {
-                        (j, Err(e)) => {
-                            jmp += j;
-                            return (jmp, Err(e));
-                        }
-                        (j, Ok(e)) => {
-                            jmp += j;
-                            vec.push(e);
-                        }
-                    }
-                }
-
+                let (jmp, body) = parse_expr_list(&tokens[0..]);
                 (
                     jmp,
-                    Ok(Many(
-                        vec.into_iter().map(|e| Ast::Expr(e)).collect::<Vec<_>>(),
-                    )),
+                    body.map(|vec| Many(
+                        vec.into_iter().map(|e| Ast::Expr(e)).collect::<Vec<_>>()
+                    ))
                 )
             }
         },
     }
+}
+
+pub fn parse_expr_list(tokens: &[Token]) -> (usize, Result<Vec<Expr>, String>) {
+    let mut vec = vec![];
+    let mut jmp = 0;
+
+    while (jmp < tokens.len()) {
+        match tokens[jmp] {
+            Token::Kwd(';') => {
+                jmp += 1;
+                break;
+            }
+            _ => (),
+        }
+
+        match parse_expr(&tokens[jmp..], &mut vec) {
+            (j, Err(e)) => {
+                jmp += j;
+                return (jmp, Err(e));
+            }
+            (j, Ok(e)) => {
+                jmp += j;
+                vec.push(e);
+            }
+        }
+    }
+
+    (jmp, Ok(vec))
 }
 
 pub fn parse(tokens: &[Token]) -> Vec<Ast> {
